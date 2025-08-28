@@ -168,9 +168,7 @@ def build_menu(df: pd.DataFrame, user_id: str | None = None) -> str:
     # save the mapping in session so replies like "1" work
     if user_id is not None:
         SESSIONS.setdefault(user_id, {})['menu_map'] = cats[:10]
-    return "*Categories* (reply with a number)
-" + "
-".join(numbered)
+    return "*Categories* (reply with a number)\n" + "\n".join(numbered)
 
 
 # -------------------- Routes --------------------
@@ -276,6 +274,7 @@ def whatsapp_webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+
 
 
 
