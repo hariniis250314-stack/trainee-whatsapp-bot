@@ -152,11 +152,8 @@ def top_matches(query: str, kb: KBState, k: int = 5):
 # -------------------- Helpers --------------------
 
 WELCOME = (
-    f"*{BOT_NAME}* here! I can answer trainee FAQs.
-
-"
-    "Type your question (e.g., *Meal timings?*) or choose from the menu.
-"
+    f"*{BOT_NAME}* here! I can answer trainee FAQs.\n\n"
+    "Type your question (e.g., *Meal timings?*) or choose from the menu.\n"
     "Send: *menu*  •  *category: Meals*  •  *help*"
 )
 
@@ -279,5 +276,6 @@ def whatsapp_webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+
 
 
