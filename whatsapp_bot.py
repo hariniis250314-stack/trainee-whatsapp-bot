@@ -56,6 +56,10 @@ app = Flask(__name__)
 KB_CSV_URL = os.getenv("KB_CSV_URL", "")
 ADMIN_CONTACT = os.getenv("ADMIN_CONTACT", "")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")  # optional validation
+BOT_NAME = os.getenv("BOT_NAME", "CTEA Mys Chatbot")  # branding name shown in messages
+
+# simple in-memory session store (per WhatsApp user)
+SESSIONS: dict[str, dict] = {}
 
 # -------------------- Knowledge Base Loader --------------------
 @dataclass
@@ -148,20 +152,28 @@ def top_matches(query: str, kb: KBState, k: int = 5):
 # -------------------- Helpers --------------------
 
 WELCOME = (
-    "Hi! I can answer trainee FAQs.\n\n"
-    "Type your question (e.g., *Meal timings?*)\n"
-    "Or try: *menu* | *category: Meals*"
+    f"*{BOT_NAME}* here! I can answer trainee FAQs.
+
+"
+    "Type your question (e.g., *Meal timings?*) or choose from the menu.
+"
+    "Send: *menu*  •  *category: Meals*  •  *help*"
 )
 
 
-def build_menu(df: pd.DataFrame) -> str:
+def build_menu(df: pd.DataFrame, user_id: str | None = None) -> str:
     cats = sorted([c for c in df['Category'].astype(str).unique() if c.strip()])
-    sample = []
-    for c in cats[:8]:
-        # pick one question example from each category
+    # number them for quick replies
+    numbered = []
+    for i, c in enumerate(cats[:10], start=1):
         q = df[df['Category'].astype(str).str.lower() == str(c).lower()].iloc[0]['Question']
-        sample.append(f"• {c} — e.g., {q}")
-    return "*Categories*\n" + "\n".join(sample)
+        numbered.append(f"{i}. *{c}* — e.g., {q}")
+    # save the mapping in session so replies like "1" work
+    if user_id is not None:
+        SESSIONS.setdefault(user_id, {})['menu_map'] = cats[:10]
+    return "*Categories* (reply with a number)
+" + "
+".join(numbered)
 
 
 # -------------------- Routes --------------------
@@ -189,20 +201,45 @@ def whatsapp_webhook():
 
     kb = load_kb()
     incoming = (request.form.get("Body") or "").strip()
+    user_id = (request.form.get("From") or "").strip()
 
     resp = MessagingResponse()
     msg = resp.message()
 
     if not incoming:
-        msg.body(WELCOME)
+        menu = build_menu(kb.df, user_id)
+        msg.body(WELCOME + "
+
+" + menu)
         return str(resp)
 
     lower = incoming.lower()
 
+    # quick greetings
+    if lower in {"hi", "hello", "hey"}:
+        menu = build_menu(kb.df, user_id)
+        msg.body(WELCOME + "
+
+" + menu)
+        return str(resp)
+
     if lower in {"help", "menu", "start"}:
-        menu = build_menu(kb.df)
+        menu = build_menu(kb.df, user_id)
         msg.body(menu)
         return str(resp)
+
+    # numeric quick-reply from menu
+    if lower.isdigit() and 'menu_map' in SESSIONS.get(user_id, {}):
+        cats = SESSIONS[user_id]['menu_map']
+        idx = int(lower) - 1
+        if 0 <= idx < len(cats):
+            chosen = cats[idx]
+            dfc = kb.df[kb.df['Category'].astype(str).str.lower() == chosen.lower()]
+            top5 = dfc.head(5)
+            lines = [f"*{chosen}* — top FAQs:"] + [f"• {q}" for q in top5['Question'].tolist()]
+            msg.body("
+".join(lines))
+            return str(resp)
 
     m = re.match(r"^category\s*:\s*(.+)$", lower)
     if m:
@@ -223,9 +260,14 @@ def whatsapp_webhook():
     conf = _confidence(score)
 
     related_qs = [kb.df.iloc[i]['Question'] for i, _ in matches[1:3]]
-    related = ("\n\nRelated: " + " | ".join(related_qs)) if related_qs else ""
+    related = ("
 
-    answer = f"*Answer* ({conf} match)\n\n{row['Answer']}{related}"
+*Related:* " + " | ".join(related_qs)) if related_qs else ""
+
+    answer = f"*{BOT_NAME}:*
+*Answer* (_{conf} match_)
+
+{row['Answer']}{related}"
 
     # Escalation if very low confidence
     if conf == "Low" and ADMIN_CONTACT:
@@ -237,3 +279,5 @@ def whatsapp_webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+
+
